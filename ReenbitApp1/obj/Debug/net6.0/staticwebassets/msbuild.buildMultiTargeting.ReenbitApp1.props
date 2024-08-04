@@ -1,0 +1,3 @@
+﻿<Project>
+  <Import Project="..\build\ReenbitApp1.props" />
+</Project>

@@ -1,0 +1,106 @@
+﻿@page "/"
+@using Azure
+@using Azure.AI.TextAnalytics
+@using Microsoft.AspNetCore.SignalR.Client
+@using ReenbitApp1.Models
+@using ReenbitApp1.Services
+@inject NavigationManager NavManager
+@inject MessageService messageService
+@implements IAsyncDisposable
+
+<div class="form-group">
+    <label>
+        User: <input @bind="userInput" />
+    </label>
+</div>
+<div class="form-group">
+    <label>
+        Message: <input @bind="messageInput" />
+    </label>
+</div>
+<button @onclick="Send" disabled="@(IsConnected == false)">Send</button>
+
+<hr />
+
+<ul>
+    @foreach (var chatMessage in chatMessages)
+    {
+        string color = "rgba(128, 128, 128, 0.4)";
+
+        switch (chatMessage.Sentiment)
+        {
+            case "Positive":
+                color = "rgba(0, 128, 0, 0.4)";
+                break;
+            case "Negative":
+                color = "rgba(255, 0, 0, 0.4)";
+                break;
+            case "Neutral":
+                color = "rgba(255, 255, 0, 0.4)";
+                break;
+            case "Mixed":
+                color = "rgba(255, 255, 0, 0.4)";
+                break;
+        }
+
+        <li>
+            <div style="display:inline-block; background-color: @color; border-radius: 5px; padding: 10px; margin-top: 10px; max-width:300px;">
+                @chatMessage.Username: @chatMessage.Message
+            </div>
+        </li>
+    }
+</ul>
+
+@code {
+    private static readonly AzureKeyCredential credentials = new AzureKeyCredential("2577e4964510467fa6c93bd32799b166");
+    private static readonly Uri endpoint = new Uri("https://reenbittestapp.cognitiveservices.azure.com/");
+
+    TextAnalyticsClient client = new TextAnalyticsClient(endpoint, credentials);
+    private HubConnection? hubConnection;
+    private List<ChatMessage> chatMessages = new();
+    private string? userInput;
+    private string? messageInput;
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavManager.ToAbsoluteUri("/chathub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        chatMessages = messageService.GetChatMessages();
+
+        hubConnection.On<string, string>("ReceiveMessage", (user, message) =>
+        {
+            chatMessages = messageService.GetChatMessages();
+            InvokeAsync(StateHasChanged);
+        });
+
+        await hubConnection.StartAsync();
+    }
+
+    private async Task Send()
+    {
+        if (userInput != null && messageInput != null)
+        {
+            DocumentSentiment documentSentiment = client.AnalyzeSentiment(messageInput);
+
+            messageService.AddMessage(new ChatMessage() { Message = messageInput, Username = userInput, Sentiment = documentSentiment.Sentiment.ToString() });
+        }
+
+        if (hubConnection is not null)
+        {
+            await hubConnection.SendAsync("SendMessage", userInput, messageInput);
+        }
+    }
+
+    public bool IsConnected => hubConnection?.State == HubConnectionState.Connected;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}
